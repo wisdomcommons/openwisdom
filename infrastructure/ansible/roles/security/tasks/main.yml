@@ -1,0 +1,50 @@
+---
+- name: Configure SSH security
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    backup: yes
+  loop:
+    - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin prohibit-password' }
+    - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
+    - { regexp: '^#?PubkeyAuthentication', line: 'PubkeyAuthentication yes' }
+    - { regexp: '^#?X11Forwarding', line: 'X11Forwarding no' }
+    - { regexp: '^#?MaxAuthTries', line: 'MaxAuthTries 3' }
+  notify: restart ssh
+  tags: [ssh, security]
+
+- name: Configure UFW firewall
+  ufw:
+    rule: "{{ item.rule }}"
+    port: "{{ item.port }}"
+    proto: "{{ item.proto | default('tcp') }}"
+  loop:
+    - { rule: 'allow', port: '{{ ssh_port }}' }
+    - { rule: 'allow', port: '80' }
+    - { rule: 'allow', port: '443' }
+  tags: [firewall, security]
+
+- name: Enable UFW
+  ufw:
+    state: enabled
+    policy: deny
+  tags: [firewall, security]
+
+- name: Configure fail2ban
+  template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    backup: yes
+  notify: restart fail2ban
+  tags: [fail2ban, security]
+
+- name: Start and enable security services
+  service:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  loop:
+    - fail2ban
+    - ufw
+  tags: [services, security]

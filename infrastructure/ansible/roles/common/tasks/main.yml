@@ -1,0 +1,43 @@
+---
+- name: Install common system packages
+  apt:
+    name:
+      - curl
+      - wget
+      - unzip
+      - git
+      - vim
+      - htop
+      - tree
+      - jq
+      - fail2ban
+      - ufw
+    state: present
+  tags: [packages]
+
+- name: Configure timezone
+  timezone:
+    name: "{{ timezone }}"
+  tags: [system]
+
+- name: Ensure app user exists
+  user:
+    name: "{{ app_user }}"
+    group: "{{ app_group }}"
+    shell: /bin/bash
+    create_home: yes
+  tags: [users]
+
+- name: Create application directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+  loop:
+    - "{{ app_directory }}"
+    - "{{ app_directory }}/logs"
+    - "{{ app_directory }}/data"
+    - "{{ app_directory }}/backups"
+  tags: [directories]

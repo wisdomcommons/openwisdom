@@ -1,0 +1,54 @@
+---
+- name: Bootstrap Open Wisdom VPS
+  hosts: open_wisdom_vps
+  become: yes
+  gather_facts: yes
+  
+  tasks:
+    - name: Ensure system is up to date
+      apt:
+        update_cache: yes
+        upgrade: dist
+        autoremove: yes
+      tags: [bootstrap, update]
+
+    - name: Install essential packages
+      apt:
+        name:
+          - curl
+          - wget
+          - unzip
+          - git
+          - vim
+          - htop
+          - tree
+          - jq
+          - python3
+          - python3-pip
+          - software-properties-common
+          - apt-transport-https
+          - ca-certificates
+          - gnupg
+          - lsb-release
+        state: present
+      tags: [bootstrap, packages]
+
+    - name: Create application user
+      user:
+        name: "{{ app_user }}"
+        group: "{{ app_group }}"
+        shell: /bin/bash
+        create_home: yes
+        system: no
+      tags: [bootstrap, users]
+
+    - name: Set timezone
+      timezone:
+        name: "{{ timezone }}"
+      tags: [bootstrap, system]
+
+    - name: Set locale
+      locale_gen:
+        name: "{{ locale }}"
+        state: present
+      tags: [bootstrap, system]

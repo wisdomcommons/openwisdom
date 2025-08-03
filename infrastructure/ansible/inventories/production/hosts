@@ -1,0 +1,11 @@
+[open_wisdom_vps]
+open-wisdom.org
+
+[open_wisdom_vps:vars]
+ansible_user=root
+ansible_ssh_private_key_file=~/.ssh/open_wisdom_vps
+ansible_python_interpreter=/usr/bin/python3
+
+[all:vars]
+environment=production
+domain_name=open-wisdom.org

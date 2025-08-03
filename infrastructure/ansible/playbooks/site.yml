@@ -1,0 +1,39 @@
+---
+- name: Configure Open Wisdom Infrastructure
+  hosts: open_wisdom_vps
+  become: yes
+  gather_facts: yes
+  
+  pre_tasks:
+    - name: Update system packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+        autoremove: yes
+      tags: [system, update]
+
+  roles:
+    - role: common
+      tags: [common, base]
+    - role: security  
+      tags: [security, hardening]
+    - role: podman
+      tags: [containers, podman]
+    - role: nginx
+      tags: [web, nginx]
+    - role: postgresql
+      tags: [database, postgresql]
+    - role: forgejo
+      tags: [git, forgejo]
+
+  post_tasks:
+    - name: Verify all services are running
+      service:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      loop:
+        - nginx
+        - postgresql
+        - forgejo
+      tags: [verify, services]

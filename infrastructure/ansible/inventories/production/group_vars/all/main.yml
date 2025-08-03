@@ -1,0 +1,37 @@
+---
+# Open Wisdom Production Configuration
+
+# Basic system configuration
+timezone: "UTC"
+locale: "en_US.UTF-8"
+
+# Security configuration
+ssh_port: 2222
+fail2ban_enabled: true
+ufw_enabled: true
+
+# SSL/TLS configuration
+ssl_cert_email: "admin@open-wisdom.org"
+ssl_provider: "letsencrypt"
+
+# Application configuration
+app_user: "openwisdom"
+app_group: "openwisdom"
+app_directory: "/opt/openwisdom"
+
+# Database configuration
+postgres_version: "15"
+postgres_db: "openwisdom_production"
+postgres_user: "openwisdom"
+
+# Container configuration
+podman_rootless: true
+container_registry: "docker.io"
+
+# Backup configuration
+backup_enabled: true
+backup_retention_days: 30
+
+# Monitoring configuration
+monitoring_enabled: true
+prometheus_retention: "15d"
