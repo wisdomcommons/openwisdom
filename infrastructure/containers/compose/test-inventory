@@ -1,0 +1,38 @@
+[open_wisdom_vps]
+ansible-test ansible_connection=podman ansible_become=false
+
+[open_wisdom_vps:vars]
+deployment_environment=test
+domain_name=localhost
+ansible_python_interpreter=/usr/bin/python3
+
+# Application configuration (use existing group)
+app_user=openwisdom
+app_group=users
+app_directory=/opt/openwisdom
+
+# System configuration
+timezone=Etc/UTC
+locale=en_US.UTF-8
+
+# Security configuration
+ssh_port=22
+fail2ban_enabled=false
+ufw_enabled=false
+
+# Database configuration
+postgres_version=15
+postgres_db=openwisdom_test
+postgres_user=openwisdom
+
+# Container configuration
+podman_rootless=true
+container_registry=docker.io
+
+# SSL/TLS configuration (disabled for testing)
+ssl_cert_email=test@example.com
+ssl_provider=selfsigned
+
+# Monitoring/backup (disabled for testing)
+backup_enabled=false
+monitoring_enabled=false

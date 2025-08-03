@@ -1,0 +1,10 @@
+---
+# Local development configuration
+timezone: "UTC"
+locale: "en_US.UTF-8"
+app_user: "{{ ansible_user }}"
+app_group: "{{ ansible_user }}"
+app_directory: "{{ ansible_user_dir }}/open-wisdom-local"
+ssh_port: 22
+fail2ban_enabled: false
+ufw_enabled: false

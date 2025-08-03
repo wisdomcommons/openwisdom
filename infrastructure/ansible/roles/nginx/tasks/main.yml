@@ -1,0 +1,445 @@
+# infrastructure/ansible/roles/nginx/tasks/main.yml
+---
+# Copyright (C) 2025 Open Wisdom
+# AGPL-3.0 License
+
+- name: Install nginx
+  apt:
+    name: nginx
+    state: present
+    update_cache: yes
+  tags: [nginx, packages]
+
+- name: Install certbot for SSL certificates
+  apt:
+    name:
+      - certbot
+      - python3-certbot-nginx
+    state: present
+  tags: [nginx, ssl]
+
+- name: Create nginx configuration directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /etc/nginx/sites-available
+    - /etc/nginx/sites-enabled
+    - /var/log/nginx
+  tags: [nginx, directories]
+
+- name: Configure main nginx.conf
+  template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/nginx.conf
+    owner: root
+    group: root
+    mode: '0644'
+    backup: yes
+  notify: restart nginx
+  tags: [nginx, config]
+
+- name: Remove default nginx site
+  file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: restart nginx
+  tags: [nginx, config]
+
+- name: Create nginx site configurations
+  template:
+    src: "{{ item.template }}"
+    dest: "/etc/nginx/sites-available/{{ item.name }}"
+    owner: root
+    group: root
+    mode: '0644'
+    backup: yes
+  loop: "{{ nginx_sites }}"
+  notify: restart nginx
+  tags: [nginx, sites]
+
+- name: Enable nginx sites
+  file:
+    src: "/etc/nginx/sites-available/{{ item.name }}"
+    dest: "/etc/nginx/sites-enabled/{{ item.name }}"
+    state: link
+  loop: "{{ nginx_sites }}"
+  notify: restart nginx
+  tags: [nginx, sites]
+
+- name: Test nginx configuration
+  command: nginx -t
+  changed_when: false
+  tags: [nginx, validation]
+
+- name: Start and enable nginx
+  service:
+    name: nginx
+    state: started
+    enabled: yes
+  tags: [nginx, service]
+
+- name: Create SSL certificates
+  command: >
+    certbot certonly --nginx --non-interactive --agree-tos
+    --email {{ ssl_cert_email }}
+    --domains {{ item.domains | join(',') }}
+  loop: "{{ nginx_sites }}"
+  when: 
+    - item.ssl | default(true)
+    - item.domains is defined
+  args:
+    creates: "/etc/letsencrypt/live/{{ item.domains[0] }}/fullchain.pem"
+  notify: restart nginx
+  tags: [nginx, ssl]
+
+- name: Set up SSL certificate renewal
+  cron:
+    name: "Renew SSL certificates"
+    minute: "0"
+    hour: "2"
+    job: "certbot renew --quiet && systemctl reload nginx"
+  tags: [nginx, ssl, cron]
+
+- name: Configure log rotation for nginx
+  copy:
+    content: |
+      /var/log/nginx/*.log {
+          daily
+          missingok
+          rotate 30
+          compress
+          delaycompress
+          notifempty
+          create 644 www-data adm
+          sharedscripts
+          prerotate
+              if [ -d /etc/logrotate.d/httpd-prerotate ]; then \
+                  run-parts /etc/logrotate.d/httpd-prerotate; \
+              fi
+          endscript
+          postrotate
+              invoke-rc.d nginx rotate >/dev/null 2>&1
+          endscript
+      }
+    dest: /etc/logrotate.d/nginx
+    owner: root
+    group: root
+    mode: '0644'
+  tags: [nginx, logging]
+
+---
+# infrastructure/ansible/roles/nginx/handlers/main.yml
+- name: restart nginx
+  service:
+    name: nginx
+    state: restarted
+
+- name: reload nginx
+  service:
+    name: nginx
+    state: reloaded
+
+---
+# infrastructure/ansible/roles/nginx/templates/nginx.conf.j2
+user www-data;
+worker_processes auto;
+pid /run/nginx.pid;
+error_log /var/log/nginx/error.log;
+include /etc/nginx/modules-enabled/*.conf;
+
+events {
+    worker_connections 768;
+}
+
+http {
+    # Rate limiting zones
+    limit_req_zone $binary_remote_addr zone=general:10m rate=10r/m;
+    limit_req_zone $binary_remote_addr zone=api:10m rate=30r/m;
+    limit_req_zone $binary_remote_addr zone=webhook:10m rate=10r/m;
+    limit_req_zone $binary_remote_addr zone=git:10m rate=60r/m;
+
+    # Basic Settings
+    sendfile on;
+    tcp_nopush on;
+    types_hash_max_size 2048;
+    server_tokens off;  # Hide nginx version
+    
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    # SSL Settings
+    ssl_protocols TLSv1.2 TLSv1.3;  # Only secure protocols
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    
+    # Security headers (default for all sites)
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Logging Settings
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                   '$status $body_bytes_sent "$http_referer" '
+                   '"$http_user_agent" "$http_x_forwarded_for"';
+    
+    access_log /var/log/nginx/access.log main;
+
+    # Gzip Settings
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types
+        text/plain
+        text/css
+        text/xml
+        text/javascript
+        application/json
+        application/javascript
+        application/xml+rss
+        application/atom+xml
+        image/svg+xml;
+
+    # Include site configurations
+    include /etc/nginx/conf.d/*.conf;
+    include /etc/nginx/sites-enabled/*;
+}
+
+---
+# infrastructure/ansible/roles/nginx/templates/main-site.conf.j2
+# Main website - open-wisdom.org
+server {
+    listen 80;
+    server_name open-wisdom.org;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name open-wisdom.org;
+
+    ssl_certificate /etc/letsencrypt/live/open-wisdom.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/open-wisdom.org/privkey.pem;
+    
+    root /var/www/open-wisdom;
+    index index.html index.htm;
+
+    location / {
+        limit_req zone=general burst=20 nodelay;
+        try_files $uri $uri/ =404;
+    }
+
+    location /api/ {
+        limit_req zone=api burst=10 nodelay;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /health {
+        access_log off;
+        return 200 "OK\n";
+        add_header Content-Type text/plain;
+    }
+
+    # Security - block common attack patterns
+    location ~ /\. {
+        deny all;
+    }
+    
+    location ~ \.(env|log|sql|bak)$ {
+        deny all;
+    }
+}
+
+---
+# infrastructure/ansible/roles/nginx/templates/www-redirect.conf.j2
+# Redirect www to non-www
+server {
+    listen 80;
+    listen 443 ssl http2;
+    server_name www.open-wisdom.org;
+
+    ssl_certificate /etc/letsencrypt/live/open-wisdom.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/open-wisdom.org/privkey.pem;
+
+    return 301 https://open-wisdom.org$request_uri;
+}
+
+---
+# infrastructure/ansible/roles/nginx/templates/zoom-service.conf.j2
+# Zoom webhook service - zoom.open-wisdom.org
+server {
+    listen 80;
+    server_name zoom.open-wisdom.org;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name zoom.open-wisdom.org;
+
+    ssl_certificate /etc/letsencrypt/live/zoom.open-wisdom.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/zoom.open-wisdom.org/privkey.pem;
+    
+    location /webhook {
+        limit_req zone=webhook burst=5 nodelay;
+        proxy_pass http://127.0.0.1:{{ zoom_service_port | default(8080) }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    location /health {
+        proxy_pass http://127.0.0.1:{{ zoom_service_port | default(8080) }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        access_log off;
+    }
+
+    location / {
+        return 404;
+    }
+}
+
+---
+# infrastructure/ansible/roles/nginx/templates/forgejo-git.conf.j2
+# Forgejo Git hosting - source.open-wisdom.org
+server {
+    listen 80;
+    server_name source.open-wisdom.org;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name source.open-wisdom.org;
+
+    ssl_certificate /etc/letsencrypt/live/source.open-wisdom.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/source.open-wisdom.org/privkey.pem;
+
+    client_max_body_size 512M;
+
+    location / {
+        limit_req zone=git burst=20 nodelay;
+        proxy_pass http://127.0.0.1:{{ forgejo_port | default(3000) }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+
+    # Special handling for git operations
+    location ~ ^.*\.git/(info/refs|git-upload-pack|git-receive-pack)$ {
+        limit_req zone=git burst=50 nodelay;
+        proxy_pass http://127.0.0.1:{{ forgejo_port | default(3000) }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 300;
+        proxy_send_timeout 300;
+    }
+}
+
+---
+# infrastructure/ansible/roles/nginx/templates/server-info.conf.j2
+# Server information page - server.open-wisdom.org
+server {
+    listen 80;
+    server_name server.open-wisdom.org;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name server.open-wisdom.org;
+
+    ssl_certificate /etc/letsencrypt/live/server.open-wisdom.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/server.open-wisdom.org/privkey.pem;
+
+    root /var/www/server-info;
+    index index.html;
+
+    location / {
+        limit_req zone=general burst=10 nodelay;
+        try_files $uri $uri/ =404;
+        auth_basic "Server Information";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+    }
+
+    location /health {
+        access_log off;
+        return 200 "Server OK\n";
+        add_header Content-Type text/plain;
+    }
+
+    # Server status (authenticated)
+    location /nginx_status {
+        stub_status on;
+        access_log off;
+        auth_basic "Server Status";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+        allow 127.0.0.1;
+        deny all;
+    }
+}
+
+---
+# infrastructure/ansible/roles/nginx/vars/main.yml
+---
+# Default variables for nginx role
+
+nginx_sites:
+  - name: "main-site.conf"
+    template: "main-site.conf.j2"
+    domains: ["open-wisdom.org"]
+    ssl: true
+    
+  - name: "www-redirect.conf"
+    template: "www-redirect.conf.j2"
+    domains: []  # Uses same cert as main site
+    ssl: false
+    
+  - name: "zoom-service.conf"
+    template: "zoom-service.conf.j2"
+    domains: ["zoom.open-wisdom.org"]
+    ssl: true
+    
+  - name: "forgejo-git.conf"
+    template: "forgejo-git.conf.j2"
+    domains: ["source.open-wisdom.org"]
+    ssl: true
+    
+  - name: "server-info.conf"
+    template: "server-info.conf.j2"
+    domains: ["server.open-wisdom.org"]
+    ssl: true
+
+# Service ports
+zoom_service_port: 8080
+forgejo_port: 3000
+main_app_port: 3000
+
+# Web root directories
+web_root: /var/www
+main_site_root: "{{ web_root }}/open-wisdom"
+server_info_root: "{{ web_root }}/server-info"

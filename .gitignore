@@ -8,8 +8,10 @@ ehthumbs.db
 Thumbs.db
 
 # IDE
+.claude/
 .vscode/
 .idea/
+CLAUDE.md
 *.swp
 *.swo
 *~

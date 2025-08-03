@@ -1,0 +1,15 @@
+[local]
+localhost ansible_connection=local
+
+[open_wisdom_vps]
+citta ansible_host=159.198.32.12 ansible_port=2222 ansible_user=njjc ansible_ssh_private_key_file=~/.ssh/id_citta
+
+[local:vars]
+environment=local
+domain_name=localhost
+ansible_python_interpreter=/usr/bin/python3
+
+[open_wisdom_vps:vars]
+deployment_environment=local
+domain_name=159.198.32.12
+ansible_python_interpreter=/usr/bin/python3
